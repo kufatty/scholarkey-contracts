@@ -1,0 +1,37 @@
+# Node modules
+/node_modules
+
+# Ignore everything inside the deployments folder (those are local deployment files)
+/deployments/*
+
+# But do not ignore the .gitkeep file to keep the folder in git
+!/deployments/.gitkeep
+
+# Compilation output
+/dist
+
+# pnpm deploy output
+/bundle
+
+# Hardhat Build Artifacts
+/artifacts
+
+# Hardhat compilation (v2) support directory
+/cache
+
+# Typechain output
+/types
+
+# Hardhat coverage reports
+/coverage
+
+# Quorum Blockchain Data
+# (Keeps the docker settings, ignores the heavy database)
+**/qdata/
+**/logs/
+
+# Secrets
+.env
+
+# Newer Hardhat Typechain output
+typechain-types/

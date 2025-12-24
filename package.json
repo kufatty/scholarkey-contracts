@@ -1,0 +1,55 @@
+{
+  "name": "scholarkey-contracts",
+  "version": "1.0.0",
+  "description": "Decentralized academic verification system on Quorum blockchain",
+  "scripts": {
+    "compile": "hardhat compile",
+    "clean": "hardhat clean",
+    "size": "hardhat size-contracts",
+    
+    "test": "hardhat test",                           
+    
+    "deploy": "hardhat run scripts/deploy.ts --network quorum",
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "verify": "hardhat verify",
+    
+    "setup": "npm run deploy && npm run setup-roles && npm run register-courses",
+    "setup-roles": "hardhat run scripts/setup-roles.ts --network quorum",
+    "register-courses": "hardhat run scripts/register-course.ts --network quorum",
+    "accounts": "hardhat run scripts/list-accounts.ts --network quorum",
+
+    "interact": "hardhat run scripts/interact.ts --network quorum",
+    "interact:local": "hardhat run scripts/interact.ts --network localhost",
+    
+    "workflow": "npm run compile && npm run test && npm run deploy && npm run setup-roles && npm run register-courses && npm run test:quorum"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.14",
+    "@nomicfoundation/hardhat-verify": "^2.0.11",
+    "@typechain/ethers-v6": "^0.5.1",
+    "@typechain/hardhat": "^9.1.0",
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.24",
+    "hardhat": "^2.22.17",
+    "hardhat-contract-sizer": "^2.10.0",
+    "hardhat-gas-reporter": "^1.0.10",
+    "solidity-coverage": "^0.8.16",
+    "typechain": "^8.3.2",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2",
+    "chai": "^4.4.1",
+    "mocha": "^10.3.0",
+    "ethers": "^6.13.4"
+  },
+  "keywords": [
+    "quorum",
+    "blockchain",
+    "academic",
+    "verification",
+    "smart-contract"
+  ],
+  "author": "",
+  "license": "MIT"
+}
