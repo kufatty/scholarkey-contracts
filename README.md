@@ -69,8 +69,8 @@ ScholarKey is a decentralized academic verification system that enables:
 ### 1. Clone and Setup
 ```bash
 # Clone the repository
-git clone <your-repository-url>
-cd schoarkey-contracts
+git clone https://github.com/kufatty/scholarkey-contracts
+cd scholarkey-contracts
 
 # Install dependencies
 npm install
