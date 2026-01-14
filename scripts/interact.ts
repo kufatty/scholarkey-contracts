@@ -12,6 +12,52 @@ function askQuestion(query: string): Promise<string> {
   return new Promise(resolve => rl.question(query, resolve));
 }
 
+// SIMPLER ALTERNATIVE: Generate signature for grade actions
+async function generateSignature(
+  contract: any,
+  signer: any,
+  student: string,
+  courseCode: string,
+  grade: number,
+  semester: string,
+  action: string
+): Promise<string> {
+  // Create the message hash exactly like the contract does
+  const message = ethers.solidityPackedKeccak256(
+    ["address", "string", "uint256", "string", "address", "string", "string"],
+    [student, courseCode, grade, semester, signer.address, action, "UCAB Academic Verification System"]
+  );
+  
+  // Convert to bytes and sign (signMessage will add the Ethereum prefix)
+  const messageBytes = ethers.getBytes(message);
+  const signature = await signer.signMessage(messageBytes);
+  
+  return signature;
+}
+
+// SIMPLER ALTERNATIVE: Generate signature for existing grade
+async function generateSignatureForGrade(
+  contract: any,
+  signer: any,
+  gradeId: number,
+  action: string
+): Promise<string> {
+  // Get the grade record
+  const gradeRecord = await contract.viewGrade(gradeId);
+  
+  // Create the message hash exactly like the contract does
+  const message = ethers.solidityPackedKeccak256(
+    ["address", "string", "uint256", "string", "address", "string", "string"],
+    [gradeRecord.student, gradeRecord.courseCode, gradeRecord.grade, gradeRecord.semester, signer.address, action, "UCAB Academic Verification System"]
+  );
+  
+  // Convert to bytes and sign (signMessage will add the Ethereum prefix)
+  const messageBytes = ethers.getBytes(message);
+  const signature = await signer.signMessage(messageBytes);
+  
+  return signature;
+}
+
 async function main() {
   console.log("🤖 AcademicVerificationSystem Interactive Console");
   console.log("=".repeat(60));
@@ -238,7 +284,7 @@ async function verificationMenu(contract: any, user: any) {
     console.log("5. Back to main menu");
     
     const choice = await askQuestion("\nChoice (1-5): ");
-    
+      
     switch (choice) {
       case '1':
         await verifySignatures(contract, user);
@@ -378,23 +424,14 @@ async function listAllGradeIds(contract: any, user: any) {
   try {
     console.log("\n⏳ Fetching all grade IDs...");
     
-    // Try to use the new function if it exists
-    try {
-      const gradeIds = await contract.getAllGradeIds();
-      console.log(`\n📋 All Grade IDs (${gradeIds.length} total):`);
-      console.log("-".repeat(40));
-      
-      // Display in chunks of 10
-      for (let i = 0; i < gradeIds.length; i += 10) {
-        const chunk = gradeIds.slice(i, i + 10);
-        console.log(chunk.join(", "));
-      }
-    } catch {
-      // Fallback: get total and suggest manual entry
-      const total = await contract.getTotalGrades();
-      console.log(`\n⚠️  Function not available in contract.`);
-      console.log(`Total grades in system: ${total}`);
-      console.log(`Grade IDs range from 1 to ${total}`);
+    const gradeIds = await contract.getAllGradeIds();
+    console.log(`\n📋 All Grade IDs (${gradeIds.length} total):`);
+    console.log("-".repeat(40));
+    
+    // Display in chunks of 10
+    for (let i = 0; i < gradeIds.length; i += 10) {
+      const chunk = gradeIds.slice(i, i + 10);
+      console.log(chunk.join(", "));
     }
   } catch (error: any) {
     console.error(`\n❌ Error: ${error.message}`);
@@ -405,19 +442,13 @@ async function listAllStudents(contract: any, user: any) {
   try {
     console.log("\n⏳ Fetching all students...");
     
-    // Try to use the new function if it exists
-    try {
-      const students = await contract.getAllStudentsWithGrades();
-      console.log(`\n👥 Students with grades (${students.length} total):`);
-      console.log("-".repeat(40));
-      
-      students.forEach((student: string, index: number) => {
-        console.log(`${index + 1}. ${student}`);
-      });
-    } catch {
-      console.log("\n⚠️  Function not available in contract.");
-      console.log("Use accounts 4-7 for testing (they're pre-assigned as students)");
-    }
+    const students = await contract.getAllStudentsWithGrades();
+    console.log(`\n👥 Students with grades (${students.length} total):`);
+    console.log("-".repeat(40));
+    
+    students.forEach((student: string, index: number) => {
+      console.log(`${index + 1}. ${student}`);
+    });
   } catch (error: any) {
     console.error(`\n❌ Error: ${error.message}`);
   }
@@ -427,31 +458,22 @@ async function listAvailableCourses(contract: any, user: any) {
   try {
     console.log("\n⏳ Fetching available courses...");
     
-    // Try to use the new function if it exists
-    try {
-      const courses = await contract.getAllCourseCodes();
-      if (courses.length === 0) {
-        console.log("\n📚 Available courses (from test data):");
-        console.log("-".repeat(40));
-        console.log("MAT101: Mathematics 101");
-        console.log("PHY201: Physics 201");
-        console.log("CS101: Computer Science 101");
-        console.log("\nℹ️  Courses not registered in contract. Use 'register-courses' script.");
-      } else {
-        console.log(`\n📚 Available courses (${courses.length} total):`);
-        console.log("-".repeat(40));
-        
-        for (const courseCode of courses) {
-          const courseName = await contract.getCourseName(courseCode);
-          console.log(`${courseCode}: ${courseName}`);
-        }
-      }
-    } catch {
+    const courses = await contract.getAllCourseCodes();
+    if (courses.length === 0) {
       console.log("\n📚 Available courses (from test data):");
       console.log("-".repeat(40));
       console.log("MAT101: Mathematics 101");
       console.log("PHY201: Physics 201");
       console.log("CS101: Computer Science 101");
+      console.log("\nℹ️  Courses not registered in contract. Use 'register-courses' script.");
+    } else {
+      console.log(`\n📚 Available courses (${courses.length} total):`);
+      console.log("-".repeat(40));
+      
+      for (const courseCode of courses) {
+        const courseName = await contract.getCourseName(courseCode);
+        console.log(`${courseCode}: ${courseName}`);
+      }
     }
   } catch (error: any) {
     console.error(`\n❌ Error: ${error.message}`);
@@ -461,25 +483,47 @@ async function listAvailableCourses(contract: any, user: any) {
 async function createGrade(contract: any, user: any) {
   try {
     console.log("\n📝 Creating new grade:");
+    
     // Show available accounts for reference
     const signers = await ethers.getSigners();
     console.log("\n📋 Available accounts for testing:");
     for (let i = 0; i < Math.min(signers.length, 11); i++) {
       console.log(`${i}: ${signers[i].address}`);
     }
+    
     const student = await askQuestion("Student address (use accounts 4-7): ");
     const course = await askQuestion("Course code (e.g., MAT101): ");
     const grade = await askQuestion("Grade (0-20): ");
     const semester = await askQuestion("Semester (e.g., 2024-1): ");
     
     // Validate inputs
-    if (parseInt(grade) < 0 || parseInt(grade) > 20) {
+    const gradeValue = parseInt(grade);
+    if (gradeValue < 0 || gradeValue > 20) {
       console.log("❌ Grade must be between 0 and 20");
       return;
     }
     
+    console.log("\n⏳ Generating teacher signature...");
+    const teacherSignature = await generateSignature(
+      contract,
+      user,
+      student,
+      course,
+      gradeValue,
+      semester,
+      "create"
+    );
+    
+    console.log(`✅ Signature generated: ${teacherSignature.substring(0, 50)}...`);
+    
     console.log("\n⏳ Creating grade...");
-    const tx = await contract.connect(user).createGrade(student, course, parseInt(grade), semester);
+    const tx = await contract.connect(user).createGrade(
+      student, 
+      course, 
+      gradeValue, 
+      semester,
+      teacherSignature
+    );
     await tx.wait();
     console.log(`✅ Grade created! Tx: ${tx.hash}`);
     
@@ -501,14 +545,27 @@ async function verifyGrade(contract: any, user: any) {
       console.log(`\n📄 Grade ${gradeId}: ${courseCode} - ${grade}/20`);
       console.log(`Current status: ${status}`);
     } catch (e) {
-      // Ignore if we can't get info
+      console.log(`\n⚠️ Could not fetch grade info: ${e}`);
     }
     
     const confirm = await askQuestion(`\nVerify grade ${gradeId}? (y/n): `);
     if (confirm.toLowerCase() !== 'y') return;
     
-    console.log("\n⏳ Verifying...");
-    const tx = await contract.connect(user).verifyGrade(parseInt(gradeId));
+    console.log("\n⏳ Generating department head signature...");
+    const departmentSignature = await generateSignatureForGrade(
+      contract,
+      user,
+      parseInt(gradeId),
+      "verify"
+    );
+    
+    console.log(`✅ Signature generated: ${departmentSignature.substring(0, 50)}...`);
+    
+    console.log("\n⏳ Verifying grade...");
+    const tx = await contract.connect(user).verifyGrade(
+      parseInt(gradeId),
+      departmentSignature
+    );
     await tx.wait();
     console.log(`✅ Verified! Tx: ${tx.hash}`);
   } catch (error: any) {
@@ -526,14 +583,27 @@ async function ratifyGrade(contract: any, user: any) {
       console.log(`\n📄 Grade ${gradeId}: ${courseCode} - ${grade}/20`);
       console.log(`Current status: ${status}`);
     } catch (e) {
-      // Ignore if we can't get info
+      console.log(`\n⚠️ Could not fetch grade info: ${e}`);
     }
     
     const confirm = await askQuestion(`\nRatify grade ${gradeId}? (y/n): `);
     if (confirm.toLowerCase() !== 'y') return;
     
-    console.log("\n⏳ Ratifying...");
-    const tx = await contract.connect(user).ratifyGrade(parseInt(gradeId));
+    console.log("\n⏳ Generating director signature...");
+    const directorSignature = await generateSignatureForGrade(
+      contract,
+      user,
+      parseInt(gradeId),
+      "ratify"
+    );
+    
+    console.log(`✅ Signature generated: ${directorSignature.substring(0, 50)}...`);
+    
+    console.log("\n⏳ Ratifying grade...");
+    const tx = await contract.connect(user).ratifyGrade(
+      parseInt(gradeId),
+      directorSignature
+    );
     await tx.wait();
     console.log(`✅ Ratified! Tx: ${tx.hash}`);
   } catch (error: any) {
@@ -600,23 +670,18 @@ async function viewGrantedAccessList(contract: any, user: any) {
   try {
     console.log("\n⏳ Checking granted access...");
     
-    try {
-      const grantedList = await contract.getGrantedAccessList(user.address);
+    const grantedList = await contract.getGrantedAccessList(user.address);
+    
+    if (grantedList.length === 0) {
+      console.log("\n📭 No one has been granted access to your grades");
+    } else {
+      console.log(`\n👥 ${grantedList.length} address(es) have access to your grades:`);
+      console.log("-".repeat(40));
       
-      if (grantedList.length === 0) {
-        console.log("\n📭 No one has been granted access to your grades");
-      } else {
-        console.log(`\n👥 ${grantedList.length} address(es) have access to your grades:`);
-        console.log("-".repeat(40));
-        
-        grantedList.forEach((addr: string, index: number) => {
-          console.log(`${index + 1}. ${addr}`);
-        });
-      }
-    } catch {
-      console.log("\n⚠️  Function not available in contract.");
-      console.log("You can still grant/revoke access, but cannot view the list.");
-    }
+      grantedList.forEach((addr: string, index: number) => {
+        console.log(`${index + 1}. ${addr}`);
+      });
+    }   
   } catch (error: any) {
     console.error(`\n❌ Error: ${error.message}`);
   }
@@ -725,6 +790,70 @@ async function verifyStudentGrade(contract: any, user: any) {
     } else {
       console.log(`❌ No grade found for ${courseCode}`);
       console.log("Student may not have taken this course yet");
+    }
+  } catch (error: any) {
+    console.error(`\n❌ Error: ${error.message}`);
+  }
+}
+
+async function verifySignatureFunction(contract: any, user: any) {
+  try {
+    console.log("\n📝 Verify a signature:");
+    
+    const student = await askQuestion("Student address: ");
+    const courseCode = await askQuestion("Course code: ");
+    const grade = await askQuestion("Grade (0-20): ");
+    const semester = await askQuestion("Semester: ");
+    const signer = await askQuestion("Signer address: ");
+    const action = await askQuestion("Action (create/verify/ratify): ");
+    
+    // Get the signature
+    console.log("\n📝 Enter the signature to verify:");
+    console.log("Format: 0x followed by 130 hex characters (65 bytes)");
+    const signature = await askQuestion("Signature: ");
+    
+    console.log("\n⏳ Verifying signature...");
+    const isValid = await contract.verifySignature(
+      student,
+      courseCode,
+      parseInt(grade),
+      semester,
+      signer,
+      action,
+      signature
+    );
+    
+    if (isValid) {
+      console.log("\n✅ Signature is VALID");
+      console.log(`The signature correctly signs the grade data with action '${action}'`);
+    } else {
+      console.log("\n❌ Signature is INVALID");
+      console.log("Possible reasons:");
+      console.log("1. Wrong signer address");
+      console.log("2. Incorrect grade data");
+      console.log("3. Wrong action type");
+      console.log("4. Signature has been tampered with");
+    }
+  } catch (error: any) {
+    console.error(`\n❌ Error: ${error.message}`);
+  }
+}
+
+async function checkSignatureUsed(contract: any, user: any) {
+  try {
+    console.log("\n📝 Check if a signature has been used:");
+    console.log("Format: 0x followed by 130 hex characters (65 bytes)");
+    const signature = await askQuestion("Signature to check: ");
+    
+    console.log("\n⏳ Checking signature...");
+    const isUsed = await contract.isSignatureUsed(signature);
+    
+    if (isUsed) {
+      console.log("\n⚠️  This signature has ALREADY been used");
+      console.log("It cannot be reused for another grade (prevents replay attacks)");
+    } else {
+      console.log("\n✅ This signature has NOT been used yet");
+      console.log("It can be used to sign a grade");
     }
   } catch (error: any) {
     console.error(`\n❌ Error: ${error.message}`);

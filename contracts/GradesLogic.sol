@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+// Import ECDSA library for signature verification
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+
 /**
  * @title AcademicVerificationSystem
  * @dev A decentralized academic verification system for UCAB with multi-level approval workflow
  * and granular access control for student grade privacy.
  */
 contract AcademicVerificationSystem {
+    using ECDSA for bytes32;
+    using MessageHashUtils for bytes32;
     
     // ============================================
     // PHASE 1: CORE STRUCTURES AND STATE VARIABLES
@@ -33,7 +39,7 @@ contract AcademicVerificationSystem {
         Finalized       // 3 - Fully approved and immutable
     }
     
-    /**
+        /**
      * @dev Structure representing a single academic grade record
      * @param id Unique identifier for the grade record
      * @param student Address of the student
@@ -41,11 +47,11 @@ contract AcademicVerificationSystem {
      * @param grade Numerical grade (0-20 scale)
      * @param semester Academic semester (e.g., "2024-1")
      * @param teacher Address of the teacher who created the grade
-     * @param teacherSignature Hash of teacher's digital signature
+     * @param teacherSignature ECDSA signature of teacher's approval
      * @param departmentHead Address of department head who verified
-     * @param departmentSignature Hash of department's verification
+     * @param departmentSignature ECDSA signature of department's verification
      * @param generalDirector Address of general director who ratified
-     * @param directorSignature Hash of director's ratification
+     * @param directorSignature ECDSA signature of director's ratification
      * @param status Current status in the approval workflow
      * @param createdAt Timestamp when grade was created
      * @param updatedAt Timestamp of last update
@@ -58,11 +64,11 @@ contract AcademicVerificationSystem {
         uint256 grade;
         string semester;
         address teacher;
-        bytes32 teacherSignature;
+        bytes teacherSignature;
         address departmentHead;
-        bytes32 departmentSignature;
+        bytes departmentSignature;
         address generalDirector;
-        bytes32 directorSignature;
+        bytes directorSignature;
         GradeStatus status;
         uint256 createdAt;
         uint256 updatedAt;
@@ -543,49 +549,6 @@ contract AcademicVerificationSystem {
     }
     
     /**
-     * @dev Internal function to generate a signature hash
-     * @param gradeId ID of the grade
-     * @param signer Address of the signer
-     * @param action Type of action (create/verify/ratify)
-     * @return bytes32 signature hash
-     */
-    function _generateSignatureHash(
-    uint256 gradeId,
-    address signer,
-    string memory action
-    ) internal view returns (bytes32) {
-        GradeRecord storage record = gradeRecords[gradeId];
-        return keccak256(
-            abi.encodePacked(
-                gradeId,
-                record.student,
-                record.courseCode,
-                record.grade,
-                record.semester,
-                signer,
-                action,
-                record.createdAt  
-            )
-        );
-    }
-        
-    /**
-     * @dev Internal function to validate a signature hasn't been reused
-     * @param signatureHash Hash to validate
-     */
-    function _validateSignatureUniqueness(bytes32 signatureHash) internal view {
-        require(!_usedSignatures[signatureHash], "Signature has already been used");
-    }
-    
-    /**
-     * @dev Internal function to mark a signature as used
-     * @param signatureHash Hash of the used signature
-     */
-    function _markSignatureUsed(bytes32 signatureHash) internal {
-        _usedSignatures[signatureHash] = true;
-    }
-    
-    /**
      * @dev Internal function to get the next grade ID
      * @return Next available grade ID
      */
@@ -594,162 +557,9 @@ contract AcademicVerificationSystem {
         return _gradeCounter;
     }
 
-        // ============================================
+    // ============================================
     // CORE WORKFLOW FUNCTIONS
     // ============================================
-
-    // The teacher creates a new grade record for a student. This is the first step in the
-    // three-tier verification process. The teacher must be assigned the Teacher role and
-    // the student must have the Student role. The grade is recorded with the teacher's
-    // digital signature, which prevents tampering and ensures accountability.
-    function createGrade(
-        address student,
-        string memory courseCode,
-        uint256 grade,
-        string memory semester
-    )
-        external
-        onlyTeacher
-        validGradeValue(grade)
-        validCourseCode(courseCode)
-        returns (uint256)
-    {
-        // Ensure the student has been assigned the Student role in the system.
-        // This prevents teachers from creating grades for unauthorized addresses.
-        require(userRoles[student] == Role.Student, "Student role required");
-
-        // Check that the course has been registered in the system.
-        // This ensures consistency and allows for proper course name display.
-        require(bytes(courseNames[courseCode]).length > 0, "Course not registered");
-
-        // Generate a unique grade ID for this new record.
-        // This ID will be used to reference the grade throughout its lifecycle.
-        uint256 gradeId = _getNextGradeId();
-
-        // Store the grade record with initial status set to Pending.
-        // The grade is not yet verified and awaits department head review.
-        gradeRecords[gradeId] = GradeRecord({
-            id: gradeId,
-            student: student,
-            courseCode: courseCode,
-            grade: grade,
-            semester: semester,
-            teacher: msg.sender,
-            teacherSignature: bytes32(0), // Empty for now
-            departmentHead: address(0),
-            departmentSignature: bytes32(0),
-            generalDirector: address(0),
-            directorSignature: bytes32(0),
-            status: GradeStatus.Pending,
-            createdAt: block.timestamp,
-            updatedAt: block.timestamp,
-            finalizedAt: 0
-        });
-
-        // NOW we generate signature (record exists in storage)
-        bytes32 teacherSig = _generateSignatureHash(gradeId, msg.sender, "create");
-
-        // Update record with signature
-        gradeRecords[gradeId].teacherSignature = teacherSig;
-
-        // Add this grade ID to the student's personal grade index.
-        // This allows efficient lookup of all grades belonging to a specific student.
-        _addGradeToStudent(student, gradeId);
-
-        // Mark the teacher's signature as used to prevent replay attacks.
-        // This ensures the same signature cannot be reused for another grade.
-        _markSignatureUsed(teacherSig);
-
-        // Emit an event so external applications can track grade creation.
-        // This is particularly useful for building user interfaces that need to
-        // display real-time updates when new grades are added.
-        emit GradeCreated(gradeId, student, msg.sender);
-
-        return gradeId;
-    }
-
-    // The department head verifies a grade that was previously created by a teacher.
-    // This represents the second level in the verification hierarchy. Only grades in
-    // Pending status can be verified, and the verifier must have DepartmentHead role.
-    function verifyGrade(uint256 gradeId)
-        external
-        onlyDepartmentHead
-        validGradeId(gradeId)
-    {
-        // Retrieve the grade record from storage. We'll be updating it.
-        GradeRecord storage record = gradeRecords[gradeId];
-
-        // Ensure the grade is in the correct state for verification.
-        // Department heads can only verify grades that are still pending and
-        // have not yet been verified by another department head.
-        require(
-            record.status == GradeStatus.Pending,
-            "Grade not in pending status"
-        );
-
-        // Create the department head's digital signature for this verification.
-        // This signature serves as cryptographic proof that the department has
-        // reviewed and approved the teacher's original grade entry.
-        bytes32 deptSig = _generateSignatureHash(gradeId, msg.sender, "verify");
-
-        // Update the grade record with verification information.
-        // The department head's address and signature are now permanently
-        // associated with this grade record in the blockchain.
-        record.departmentHead = msg.sender;
-        record.departmentSignature = deptSig;
-        record.status = GradeStatus.DepartmentVerified;
-        record.updatedAt = block.timestamp;
-
-        // Mark the department signature as used to prevent replay attacks.
-        // This ensures the same verification cannot be applied to multiple grades.
-        _markSignatureUsed(deptSig);
-
-        // Emit an event to notify external systems of the verification.
-        // This allows tracking the progress of grades through the approval workflow.
-        emit GradeVerified(gradeId, msg.sender);
-    }
-
-    // The general director ratifies a grade that has been verified by a department head.
-    // This is the final step in the verification chain. Once ratified, the grade is
-    // finalized and becomes immutable, representing the official academic record.
-    function ratifyGrade(uint256 gradeId)
-        external
-        onlyGeneralDirector
-        validGradeId(gradeId)
-    {
-        // Retrieve the grade record from storage. We'll be updating it.
-        GradeRecord storage record = gradeRecords[gradeId];
-
-        // Ensure the grade is ready for ratification. The grade must have been
-        // verified by a department head but not yet ratified by a general director.
-        require(
-            record.status == GradeStatus.DepartmentVerified,
-            "Grade not verified by department"
-        );
-
-        // Create the general director's digital signature for this ratification.
-        // This final signature represents the highest level of institutional approval
-        // and makes the grade record official and immutable.
-        bytes32 directorSig = _generateSignatureHash(gradeId, msg.sender, "ratify");
-
-        // Finalize the grade record with the director's approval.
-        // The grade status is updated to Finalized, and the finalized timestamp
-        // records when the grade became an official academic record.
-        record.generalDirector = msg.sender;
-        record.directorSignature = directorSig;
-        record.status = GradeStatus.Finalized;
-        record.updatedAt = block.timestamp;
-        record.finalizedAt = block.timestamp;
-
-        // Mark the director signature as used to prevent replay attacks.
-        // This ensures the same ratification cannot be applied to multiple grades.
-        _markSignatureUsed(directorSig);
-
-        // Emit events to notify external systems of the ratification and finalization.
-        // These events allow applications to know when grades become official records.
-        emit GradeRatified(gradeId, msg.sender);
-        emit GradeFinalized(gradeId);
-    }
 
     // Allows authorized users to view a complete grade record. The authorization follows
     // a zero-knowledge inspired approach: the student owns their data and controls who
@@ -899,6 +709,177 @@ contract AcademicVerificationSystem {
         }
     }
 
+
+    // ============================================
+    // GRADE VERIFICATION FUNCTIONS
+    // ============================================
+
+        // The teacher creates a new grade record for a student. This is the first step in the
+    // three-tier verification process. The teacher must be assigned the Teacher role and
+    // the student must have the Student role. The grade is recorded with the teacher's
+    // digital signature, which prevents tampering and ensures accountability.
+    function createGrade(
+        address student,
+        string memory courseCode,
+        uint256 grade,
+        string memory semester,
+        bytes memory teacherSignature
+    )
+        external
+        onlyTeacher
+        validGradeValue(grade)
+        validCourseCode(courseCode)
+        returns (uint256)
+    {
+        // Ensure the student has been assigned the Student role in the system.
+        // This prevents teachers from creating grades for unauthorized addresses.
+        require(userRoles[student] == Role.Student, "Student role required");
+
+        // Check that the course has been registered in the system.
+        // This ensures consistency and allows for proper course name display.
+        require(bytes(courseNames[courseCode]).length > 0, "Course not registered");
+
+        // Validate the signature hasn't been reused
+        _validateSignatureUniqueness(teacherSignature);
+
+        // Generate a unique grade ID for this new record.
+        // This ID will be used to reference the grade throughout its lifecycle.
+        uint256 gradeId = _getNextGradeId();
+
+        // Store the grade record with initial status set to Pending.
+        // The grade is not yet verified and awaits department head review.
+        gradeRecords[gradeId] = GradeRecord({
+            id: gradeId,
+            student: student,
+            courseCode: courseCode,
+            grade: grade,
+            semester: semester,
+            teacher: msg.sender,
+            teacherSignature: teacherSignature, 
+            departmentHead: address(0),
+            departmentSignature: new bytes(0),
+            generalDirector: address(0),
+            directorSignature: new bytes(0),
+            status: GradeStatus.Pending,
+            createdAt: block.timestamp,
+            updatedAt: block.timestamp,
+            finalizedAt: 0
+        });
+
+        // Verify the teacher's signature using unified message hash
+        bytes32 messageHash = getMessageHash(student, courseCode, grade, semester, msg.sender, "create");
+        require(
+            _verifySignature(messageHash, teacherSignature, msg.sender),
+            "Invalid teacher signature"
+        );
+
+        // Mark the signature as used to prevent replay attacks
+        _markSignatureUsed(teacherSignature);
+
+        // Add this grade ID to the student's personal grade index
+        _addGradeToStudent(student, gradeId);
+
+        // Emit an event so external applications can track grade creation
+        emit GradeCreated(gradeId, student, msg.sender);
+
+        return gradeId;
+    }
+
+    // The department head verifies a grade that was previously created by a teacher.
+    // This represents the second level in the verification hierarchy. Only grades in
+    // Pending status can be verified, and the verifier must have DepartmentHead role.
+    function verifyGrade(uint256 gradeId, bytes memory departmentSignature)
+        external
+        onlyDepartmentHead
+        validGradeId(gradeId)
+    {
+        // Retrieve the grade record from storage. We'll be updating it.
+        GradeRecord storage record = gradeRecords[gradeId];
+
+        // Ensure the grade is in the correct state for verification.
+        // Department heads can only verify grades that are still pending and
+        // have not yet been verified by another department head.
+        require(
+            record.status == GradeStatus.Pending,
+            "Grade not in pending status"
+        );
+
+        // Validate the signature hasn't been reused
+        _validateSignatureUniqueness(departmentSignature);
+
+        // Verify the department head's signature using unified message hash
+        bytes32 messageHash = getMessageHash(record.student, record.courseCode, record.grade, record.semester, msg.sender, "verify");
+        require(
+            _verifySignature(messageHash, departmentSignature, msg.sender),
+            "Invalid department signature"
+        );
+
+        // Update the grade record with verification information.
+        // The department head's address and signature are now permanently
+        // associated with this grade record in the blockchain.
+        record.departmentHead = msg.sender;
+        record.departmentSignature = departmentSignature;
+        record.status = GradeStatus.DepartmentVerified;
+        record.updatedAt = block.timestamp;
+
+        // Mark the department signature as used to prevent replay attacks.
+        // This ensures the same verification cannot be applied to multiple grades.
+        _markSignatureUsed(departmentSignature);
+
+        // Emit an event to notify external systems of the verification.
+        // This allows tracking the progress of grades through the approval workflow.
+        emit GradeVerified(gradeId, msg.sender);
+    }
+
+    // The general director ratifies a grade that has been verified by a department head.
+    // This is the final step in the verification chain. Once ratified, the grade is
+    // finalized and becomes immutable, representing the official academic record.
+    function ratifyGrade(uint256 gradeId, bytes memory directorSignature)
+        external
+        onlyGeneralDirector
+        validGradeId(gradeId)
+    {
+        // Retrieve the grade record from storage. We'll be updating it.
+        GradeRecord storage record = gradeRecords[gradeId];
+
+        // Ensure the grade is ready for ratification. The grade must have been
+        // verified by a department head but not yet ratified by a general director.
+        require(
+            record.status == GradeStatus.DepartmentVerified,
+            "Grade not verified by department"
+        );
+
+         // Validate the signature hasn't been reused
+        _validateSignatureUniqueness(directorSignature);
+
+        // Verify the general director's signature using unified message hash
+        bytes32 messageHash = getMessageHash(record.student, record.courseCode, record.grade, record.semester, msg.sender, "ratify");
+        require(
+            _verifySignature(messageHash, directorSignature, msg.sender),
+            "Invalid director signature"
+        );
+
+        // Finalize the grade record with the director's approval.
+        // The grade status is updated to Finalized, and the finalized timestamp
+        // records when the grade became an official academic record.
+        record.generalDirector = msg.sender;
+        record.directorSignature = directorSignature;
+        record.status = GradeStatus.Finalized;
+        record.updatedAt = block.timestamp;
+        record.finalizedAt = block.timestamp;
+
+        // Mark the director signature as used to prevent replay attacks.
+        // This ensures the same ratification cannot be applied to multiple grades.
+        _markSignatureUsed(directorSignature);
+
+        // Emit events to notify external systems of the ratification and finalization.
+        // These events allow applications to know when grades become official records.
+        emit GradeRatified(gradeId, msg.sender);
+        emit GradeFinalized(gradeId);
+    }
+
+
+
     // Allows third parties to verify a student's grade for a specific course.
     // This implements the zero-knowledge inspired privacy: external parties can
     // verify academic standing without accessing unnecessary personal information.
@@ -961,42 +942,64 @@ contract AcademicVerificationSystem {
         // Recreate each signature hash to verify authenticity.
         // We generate what the signature should be and compare it to what was stored.
 
-        // Check teacher signature
-        if (record.teacher != address(0)) {
-            bytes32 expectedTeacherSig = _generateSignatureHash(
-                gradeId,
+        // Check teacher signature if there is a teacher address and the teacher signature exists
+        if (record.teacher != address(0) && record.teacherSignature.length > 0) {
+            bytes32 teacherMessageHash = getMessageHash(
+                record.student,
+                record.courseCode,
+                record.grade,
+                record.semester,
                 record.teacher,
                 "create"
             );
-            teacherValid = (record.teacherSignature == expectedTeacherSig);
+            teacherValid = _verifySignature(
+                teacherMessageHash,
+                record.teacherSignature,
+                record.teacher
+            );
         }
 
-        // Check department signature if it exists
-        if (record.departmentHead != address(0)) {
-            bytes32 expectedDeptSig = _generateSignatureHash(
-                gradeId,
+        // Check department signature if there is a department address and the department signature exists 
+        if (record.departmentHead != address(0) && record.departmentSignature.length > 0) {
+            bytes32 deptMessageHash = getMessageHash(
+                record.student,
+                record.courseCode,
+                record.grade,
+                record.semester,
                 record.departmentHead,
                 "verify"
             );
-            departmentValid = (record.departmentSignature == expectedDeptSig);
+            departmentValid = _verifySignature(
+                deptMessageHash,
+                record.departmentSignature,
+                record.departmentHead
+            );
         }
 
-        // Check director signature if it exists
-        if (record.generalDirector != address(0)) {
-            bytes32 expectedDirectorSig = _generateSignatureHash(
-                gradeId,
+        // Check director signature if there is a general director address and the director signature exists
+        if (record.generalDirector != address(0) && record.directorSignature.length > 0) {
+            bytes32 directorMessageHash = getMessageHash(
+                record.student,
+                record.courseCode,
+                record.grade,
+                record.semester,
                 record.generalDirector,
                 "ratify"
             );
-            directorValid = (record.directorSignature == expectedDirectorSig);
+            directorValid = _verifySignature(
+                directorMessageHash,
+                record.directorSignature,
+                record.generalDirector
+            );
         }
 
-         // A grade is "all valid" ONLY when:
-        // 1. All three signatures exist (all signer addresses are set)
-        // 2. All three signatures are cryptographically valid
+        // A grade is "all valid" ONLY when:
+        // 1. All three signers are set
+        // 2. All three signatures exist
+        // 3. All three signatures are cryptographically valid
         allValid = (record.teacher != address(0) && teacherValid) &&
-        (record.departmentHead != address(0) && departmentValid) &&
-        (record.generalDirector != address(0) && directorValid);
+                   (record.departmentHead != address(0) && departmentValid) &&
+                   (record.generalDirector != address(0) && directorValid);
     }
 
     // Checks if a grade record is fully verified and finalized.
@@ -1072,32 +1075,128 @@ contract AcademicVerificationSystem {
     // SIGNATURE VERIFICATION HELPERS
     // ============================================
 
-    // Generates what a signature should be for a given grade and signer.
-    // This is useful for off-chain verification or debugging signature issues.
-    // By comparing the generated signature with the stored one, anyone can
-    // independently verify the authenticity of a grade record.
-    function generateExpectedSignature(
-        uint256 gradeId,
+    /**
+     * @dev Generates the message hash that should be signed for ANY grade action
+     * This unified approach signs the grade DATA, not database metadata
+     * @param student Address of the student
+     * @param courseCode Code identifying the course
+     * @param grade Numerical grade (0-20 scale)
+     * @param semester Academic semester
+     * @param signer Address of the signer
+     * @param action Type of action (create/verify/ratify)
+     * @return bytes32 The message hash that should be signed
+     */
+    function getMessageHash(
+        address student,
+        string memory courseCode,
+        uint256 grade,
+        string memory semester,
         address signer,
         string memory action
-    )
-        external
-        view
-        validGradeId(gradeId)
-        returns (bytes32)
-    {
-        return _generateSignatureHash(gradeId, signer, action);
+    ) public pure returns (bytes32) {
+        // Create a unified message that includes ONLY the grade data and action
+        // No gradeId, no timestamp - just the academic fact being certified
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(
+                student,
+                courseCode,
+                grade,
+                semester,
+                signer,
+                action,
+                "UCAB Academic Verification System"
+            )
+        );
+        return messageHash.toEthSignedMessageHash();
+    }
+    
+    /**
+     * @dev Internal function to verify an ECDSA signature
+     * @param messageHash The signed message hash (already with Ethereum prefix)
+     * @param signature The ECDSA signature to verify
+     * @param expectedSigner The address that should have signed the message
+     * @return bool True if signature is valid and matches expected signer
+     */
+    function _verifySignature(
+        bytes32 messageHash,
+        bytes memory signature,
+        address expectedSigner
+    ) internal pure returns (bool) {
+        // Recover the signer address from the signature
+        address recoveredSigner = messageHash.recover(signature);
+        // Check if recovered signer matches expected signer
+        return recoveredSigner == expectedSigner;
+    }
+        
+     /**
+     * @dev Internal function to validate a signature hasn't been reused
+     * @param signature The ECDSA signature to validate
+     */
+    function _validateSignatureUniqueness(bytes memory signature) internal view {
+        bytes32 signatureHash = keccak256(signature);
+        require(!_usedSignatures[signatureHash], "Signature has already been used");
+    }
+    
+    /**
+     * @dev Internal function to mark a signature as used
+     * @param signature The ECDSA signature to mark as used
+     */
+    function _markSignatureUsed(bytes memory signature) internal {
+        bytes32 signatureHash = keccak256(signature);
+        _usedSignatures[signatureHash] = true;
+    }
+
+        /**
+     * @dev Allows anyone to verify a signature for a grade action
+     * @param student Address of the student
+     * @param courseCode Code identifying the course
+     * @param grade Numerical grade (0-20 scale)
+     * @param semester Academic semester
+     * @param signer Address that should have signed the message
+     * @param action The action that was signed (create/verify/ratify)
+     * @param signature The ECDSA signature to verify
+     * @return bool True if signature is valid for the given parameters
+     */
+    function verifySignature(
+        address student,
+        string memory courseCode,
+        uint256 grade,
+        string memory semester,
+        address signer,
+        string memory action,
+        bytes memory signature
+    ) external pure returns (bool) {
+        bytes32 messageHash = getMessageHash(student, courseCode, grade, semester, signer, action);
+        return _verifySignature(messageHash, signature, signer);
     }
 
     // Checks if a specific signature hash has already been used in the system.
     // This helps prevent replay attacks by ensuring each signature is unique
     // to a specific grade record and cannot be reused.
-    function isSignatureUsed(bytes32 signatureHash)
+    function isSignatureUsed(bytes memory signature)
         external
         view
         returns (bool)
     {
+        bytes32 signatureHash = keccak256(signature);
         return _usedSignatures[signatureHash];
+    }
+
+    /**
+     * @dev Helper to get message hash for an existing grade record
+     * This is a convenience wrapper that fetches grade data from storage
+     * @param gradeId ID of the grade
+     * @param signer Address of the signer
+     * @param action Type of action (create/verify/ratify)
+     * @return bytes32 The message hash that should be signed
+     */
+    function getMessageHashForGrade(
+        uint256 gradeId,
+        address signer,
+        string memory action
+    ) external view validGradeId(gradeId) returns (bytes32) {
+        GradeRecord storage record = gradeRecords[gradeId];
+        return getMessageHash(record.student, record.courseCode, record.grade, record.semester, signer, action);
     }
 }
 
