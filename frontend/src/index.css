@@ -11,9 +11,17 @@ body {
   background: #fff;
   padding: 20px;
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(2,6,23,0.08);
+  box-shadow: 0 4px 20px rgba(2, 6, 23, 0.08);
 }
 
-button { cursor: pointer }
+button {
+  cursor: pointer;
+}
 
-input, select, textarea { padding: 8px; margin: 4px 0; width: 100%; }
+input,
+select,
+textarea {
+  padding: 8px;
+  margin: 4px 0;
+  width: 100%;
+}

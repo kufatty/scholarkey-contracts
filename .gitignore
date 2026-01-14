@@ -1,5 +1,6 @@
 # Node modules
 /node_modules
+/frontend/node_modules
 
 # Ignore everything inside the deployments folder (those are local deployment files)
 /deployments/*
