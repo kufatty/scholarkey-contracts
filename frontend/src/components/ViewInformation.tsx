@@ -93,7 +93,7 @@ export default function ViewInformation() {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
       const viewer = await signer.getAddress();
-      const contract = await getContract();
+      const contract = await getContractWithSigner();
       if (!contract) throw new Error("Contract not configured");
 
       const hasAccess: boolean = await contract.hasAccess(student, viewer);
